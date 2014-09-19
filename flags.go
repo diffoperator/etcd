@@ -1,5 +1,46 @@
 package main
 
+import (
+       "crypto/sha1"
+       "encoding/binary"
+       "errors"
+       "os"
+       "strings"
+)
+
+// NodeName implements the flag.Value interface for choosing a default
+// etcd node name and generating the internal ID using a sha hash.
+type NodeName string
+
+func (nn *NodeName) Set(s string) error {
+if s != "" {
+	*nn = NodeName(s)
+		return nil
+	}
+
+	host, err := os.Hostname()
+	if host != "" && err == nil {
+		*nn = NodeName(host)
+		return nil
+	}
+
+	*nn = NodeName("default")
+	return nil
+}
+
+func (nn *NodeName) String() string {
+	return string(*nn)
+}
+
+func (nn *NodeName) ID() int64 {
+	hash := sha1.Sum([]byte(*nn))
+	out := int64(binary.BigEndian.Uint64(hash[:8]))
+	if out < 0 {
+		out = out * -1
+	}
+	return out
+}
+
 // Addrs implements the flag.Value interface to allow users to define multiple
 // listen addresses on the command-line
 type Addrs []string

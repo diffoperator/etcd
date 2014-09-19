@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -9,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/coreos/etcd/etcdserver"
@@ -32,12 +29,12 @@ const (
 )
 
 var (
-	fid       = flag.String("id", "0x1", "ID of this server")
 	timeout   = flag.Duration("timeout", 10*time.Second, "Request Timeout")
 	paddr     = flag.String("peer-bind-addr", ":7001", "Peer service address (e.g., ':7001')")
 	dir       = flag.String("data-dir", "", "Path to the data directory")
 	snapCount = flag.Int64("snapshot-count", etcdserver.DefaultSnapCount, "Number of committed transactions to trigger a snapshot")
 
+	name NodeName
 	peers     = &etcdhttp.Peers{}
 	addrs     = &Addrs{}
 	proxyFlag = new(ProxyFlag)
@@ -53,7 +50,9 @@ func init() {
 	flag.Var(peers, "peers", "your peers")
 	flag.Var(addrs, "bind-addr", "List of HTTP service addresses (e.g., '127.0.0.1:4001,10.0.0.1:8080')")
 	flag.Var(proxyFlag, "proxy", fmt.Sprintf("Valid values include %s", strings.Join(proxyFlagValues, ", ")))
-	peers.Set("0x1=localhost:8080")
+	flag.Var(&name, "name", "Unique human-readable name for this node")
+
+	name.Set("default")
 	addrs.Set("127.0.0.1:4001")
 	proxyFlag.Set(proxyFlagValueOff)
 }
@@ -75,12 +74,11 @@ func main() {
 
 // startEtcd launches the etcd server and HTTP handlers for client/server communication.
 func startEtcd() {
-	id, err := strconv.ParseInt(*fid, 0, 64)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if id == raft.None {
-		log.Fatalf("etcd: cannot use None(%d) as etcdserver id", raft.None)
+	id := name.ID()
+
+	// We are running as a single machine; setup our single machine cluster
+	if len(*peers) == 0 {
+		peers.Set(fmt.Sprintf("%v=%v", id, addrs.String()))
 	}
 
 	if peers.Pick(id) == "" {
@@ -92,7 +90,7 @@ func startEtcd() {
 	}
 
 	if *dir == "" {
-		*dir = fmt.Sprintf("%v_etcd_data", *fid)
+		*dir = fmt.Sprintf("%v_etcd_data", uint64(id))
 		log.Printf("main: no data-dir is given, using default data-dir ./%s", *dir)
 	}
 	if err := os.MkdirAll(*dir, privateDirMode); err != nil {
@@ -155,6 +153,8 @@ func startEtcd() {
 		SnapCount:  *snapCount,
 	}
 	s.Start()
+
+	log.Printf("started node name=%s id=%v", name, name.ID())
 
 	ch := etcdhttp.NewClientHandler(s, *peers, *timeout)
 	ph := etcdhttp.NewPeerHandler(s)
